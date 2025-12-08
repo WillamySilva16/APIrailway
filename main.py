@@ -21,10 +21,10 @@ app.add_middleware(
 # ----------------------------------------------------
 def conectar_bd():
     conn = pymssql.connect(
-        server=os.getenv("SERVER"),
-        user=os.getenv("USERNAME"),
-        password=os.getenv("PASSWORD"),
-        database=os.getenv("DATABASE"),
+        server=os.getenv("DB_SERVER"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASS"),
+        database=os.getenv("DB_NAME"),
         port=1433,
         tds_version='7.4'
     )
