@@ -61,7 +61,8 @@ def visitas_periodo(last_date: str = "2000-01-01T00:00:00"):
                 CIDADE,
                 UF,
                 COMPLEMENTO,
-                CEP
+                CEP,
+                TIPO_CHECKIN
             FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
             WHERE DATA_HORA_INICIO > %s
             ORDER BY DATA_HORA_INICIO ASC
