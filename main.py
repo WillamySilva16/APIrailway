@@ -100,7 +100,7 @@ def visitas_periodo(
         }
 
 # ----------------------------------------------------
-# /visitas_por_id – BACKFILL CIRÚRGICO POR ID
+# /visitas_por_id – backfill cirúrgico por ID
 # ----------------------------------------------------
 @app.get("/visitas_por_id")
 def visitas_por_id(id_inicio: int, id_fim: int):
@@ -154,8 +154,6 @@ def visitas_por_id(id_inicio: int, id_fim: int):
             "message": str(e)
         }
 
-
-
 # ----------------------------------------------------
 # /visitas_backfill_data – backfill histórico paginado
 # ----------------------------------------------------
@@ -202,6 +200,24 @@ def visitas_backfill_data(
             OFFSET %s ROWS
             FETCH NEXT %s ROWS ONLY
         """
+
+        cursor.execute(query, (data_fim_dt, offset, limit))
+        registros = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "status": "success",
+            "total": len(registros),
+            "data": registros
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 # ----------------------------------------------------
 # Health check
