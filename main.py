@@ -154,6 +154,55 @@ def visitas_por_id(id_inicio: int, id_fim: int):
             "message": str(e)
         }
 
+
+
+# ----------------------------------------------------
+# /visitas_backfill_data – backfill histórico paginado
+# ----------------------------------------------------
+@app.get("/visitas_backfill_data")
+def visitas_backfill_data(
+    data_fim: str,
+    limit: int = 500,
+    offset: int = 0
+):
+    try:
+        data_fim_dt = datetime.fromisoformat(
+            data_fim.replace("Z", "")
+        )
+
+        conn = conectar_bd()
+        cursor = conn.cursor(as_dict=True)
+
+        query = """
+            SELECT
+                ID_OS,
+                CODIGO_OS,
+                SUPERVISOR,
+                CLIENTE,
+                DATA_HORA_FIM,
+                DATA_HORA_INICIO,
+                STATUS_OS,
+                GRUPO_CLIENTE,
+                DATA_HORA_AGENDAMENTO,
+                STATUS_VISITA,
+                LOCALIZACAO_INICIO,
+                MOTIVO_NAO_VISITA,
+                OUTRO_MOTIVO_NAO_VISITA,
+                ENDERECO,
+                NUMERO_ENDERECO,
+                BAIRRO,
+                CIDADE,
+                UF,
+                COMPLEMENTO,
+                CEP,
+                TIPO_CHECKIN
+            FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
+            WHERE DATA_HORA_INICIO < %s
+            ORDER BY DATA_HORA_INICIO ASC, ID_OS ASC
+            OFFSET %s ROWS
+            FETCH NEXT %s ROWS ONLY
+        """
+
 # ----------------------------------------------------
 # Health check
 # ----------------------------------------------------
