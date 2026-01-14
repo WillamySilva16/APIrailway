@@ -2,11 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import pymssql
 import os
+from datetime import datetime
 
 app = FastAPI()
 
 # ----------------------------------------------------
-# CORS liberado
+# CORS
 # ----------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -17,30 +18,36 @@ app.add_middleware(
 )
 
 # ----------------------------------------------------
-# Conexão com SQL Server (Azure) usando pymssql
+# Conexão com SQL Server
 # ----------------------------------------------------
 def conectar_bd():
-    conn = pymssql.connect(
+    return pymssql.connect(
         server=os.getenv("DB_SERVER"),
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASS"),
         database=os.getenv("DB_NAME"),
         port=1433,
-        tds_version='7.4'
+        tds_version="7.4"
     )
-    return conn
-
 
 # ----------------------------------------------------
-# /visitas_periodo – puxar registros incrementais
+# /visitas_periodo – incremental robusto
 # ----------------------------------------------------
 @app.get("/visitas_periodo")
-def visitas_periodo(last_date: str = "2000-01-01T00:00:00"):
+def visitas_periodo(
+    last_date: str = "2000-01-01T00:00:00",
+    last_id: int = 0
+):
     try:
+        # 🔹 Normaliza data (evita erro de timezone/Z)
+        last_date_dt = datetime.fromisoformat(
+            last_date.replace("Z", "")
+        )
+
         conn = conectar_bd()
         cursor = conn.cursor(as_dict=True)
 
-        query = f"""
+        query = """
             SELECT
                 ID_OS,
                 CODIGO_OS,
@@ -64,11 +71,18 @@ def visitas_periodo(last_date: str = "2000-01-01T00:00:00"):
                 CEP,
                 TIPO_CHECKIN
             FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
-            WHERE DATA_HORA_INICIO > %s
-            ORDER BY DATA_HORA_INICIO ASC
+            WHERE
+                (DATA_HORA_INICIO > %s)
+                OR (
+                    DATA_HORA_INICIO = %s
+                    AND ID_OS > %s
+                )
+            ORDER BY
+                DATA_HORA_INICIO ASC,
+                ID_OS ASC
         """
 
-        cursor.execute(query, (last_date,))
+        cursor.execute(query, (last_date_dt, last_date_dt, last_id))
         registros = cursor.fetchall()
 
         cursor.close()
@@ -81,12 +95,14 @@ def visitas_periodo(last_date: str = "2000-01-01T00:00:00"):
         }
 
     except Exception as e:
-        return {"status": "error", "message": str(e)}
-
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 # ----------------------------------------------------
-# Rota inicial
+# Health check
 # ----------------------------------------------------
 @app.get("/")
 def home():
-    return {"message": "API da Prime Operando no Railway! 🚀"}
+    return {"message": "API Prime – OK 🚀"}
