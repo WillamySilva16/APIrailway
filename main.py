@@ -31,7 +31,7 @@ def conectar_bd():
     )
 
 # ----------------------------------------------------
-# /visitas_periodo – incremental robusto
+# /visitas_periodo – incremental robusto (DATA + ID)
 # ----------------------------------------------------
 @app.get("/visitas_periodo")
 def visitas_periodo(
@@ -39,7 +39,6 @@ def visitas_periodo(
     last_id: int = 0
 ):
     try:
-        # 🔹 Normaliza data (evita erro de timezone/Z)
         last_date_dt = datetime.fromisoformat(
             last_date.replace("Z", "")
         )
@@ -83,6 +82,61 @@ def visitas_periodo(
         """
 
         cursor.execute(query, (last_date_dt, last_date_dt, last_id))
+        registros = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "status": "success",
+            "total": len(registros),
+            "data": registros
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+# ----------------------------------------------------
+# /visitas_por_id – BACKFILL CIRÚRGICO POR ID
+# ----------------------------------------------------
+@app.get("/visitas_por_id")
+def visitas_por_id(id_inicio: int, id_fim: int):
+    try:
+        conn = conectar_bd()
+        cursor = conn.cursor(as_dict=True)
+
+        query = """
+            SELECT
+                ID_OS,
+                CODIGO_OS,
+                SUPERVISOR,
+                CLIENTE,
+                DATA_HORA_FIM,
+                DATA_HORA_INICIO,
+                STATUS_OS,
+                GRUPO_CLIENTE,
+                DATA_HORA_AGENDAMENTO,
+                STATUS_VISITA,
+                LOCALIZACAO_INICIO,
+                MOTIVO_NAO_VISITA,
+                OUTRO_MOTIVO_NAO_VISITA,
+                ENDERECO,
+                NUMERO_ENDERECO,
+                BAIRRO,
+                CIDADE,
+                UF,
+                COMPLEMENTO,
+                CEP,
+                TIPO_CHECKIN
+            FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
+            WHERE ID_OS BETWEEN %s AND %s
+            ORDER BY ID_OS ASC
+        """
+
+        cursor.execute(query, (id_inicio, id_fim))
         registros = cursor.fetchall()
 
         cursor.close()
