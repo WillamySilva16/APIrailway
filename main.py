@@ -31,17 +31,23 @@ def conectar_bd():
     )
 
 # ----------------------------------------------------
-# /visitas_periodo – incremental robusto (DATA + ID)
+# /visitas_periodo – incremental blindado (>= 2025)
 # ----------------------------------------------------
 @app.get("/visitas_periodo")
 def visitas_periodo(
-    last_date: str = "2000-01-01T00:00:00",
+    last_date: str = "2025-01-01T00:00:00",
     last_id: int = 0
 ):
     try:
+        DATA_INICIO_FIXA = datetime(2025, 1, 1)
+
         last_date_dt = datetime.fromisoformat(
             last_date.replace("Z", "")
         )
+
+        # Garante que nunca volte antes de 2025
+        if last_date_dt < DATA_INICIO_FIXA:
+            last_date_dt = DATA_INICIO_FIXA
 
         conn = conectar_bd()
         cursor = conn.cursor(as_dict=True)
@@ -71,17 +77,29 @@ def visitas_periodo(
                 TIPO_CHECKIN
             FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
             WHERE
-                (DATA_HORA_INICIO > %s)
-                OR (
-                    DATA_HORA_INICIO = %s
-                    AND ID_OS > %s
+                DATA_HORA_INICIO >= %s
+                AND (
+                    DATA_HORA_INICIO > %s
+                    OR (
+                        DATA_HORA_INICIO = %s
+                        AND ID_OS > %s
+                    )
                 )
             ORDER BY
                 DATA_HORA_INICIO ASC,
                 ID_OS ASC
         """
 
-        cursor.execute(query, (last_date_dt, last_date_dt, last_id))
+        cursor.execute(
+            query,
+            (
+                DATA_INICIO_FIXA,
+                last_date_dt,
+                last_date_dt,
+                last_id
+            )
+        )
+
         registros = cursor.fetchall()
 
         cursor.close()
@@ -100,7 +118,7 @@ def visitas_periodo(
         }
 
 # ----------------------------------------------------
-# /visitas_por_id – backfill cirúrgico por ID
+# /visitas_por_id – backfill cirúrgico por faixa de ID
 # ----------------------------------------------------
 @app.get("/visitas_por_id")
 def visitas_por_id(id_inicio: int, id_fim: int):
@@ -155,7 +173,7 @@ def visitas_por_id(id_inicio: int, id_fim: int):
         }
 
 # ----------------------------------------------------
-# /visitas_backfill_data – backfill histórico paginado
+# /visitas_backfill_data – histórico paginado (< data)
 # ----------------------------------------------------
 @app.get("/visitas_backfill_data")
 def visitas_backfill_data(
