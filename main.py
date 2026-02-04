@@ -164,7 +164,9 @@ def visitas_full(
             FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
             WHERE DATA_HORA_INICIO >= %s
             ORDER BY DATA_HORA_INICIO ASC, ID_OS ASC
+            OFFSET 0 ROWS
             FETCH NEXT %s ROWS ONLY
+
         """
 
         cursor.execute(query, (start_dt, limit))
