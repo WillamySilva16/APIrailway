@@ -18,7 +18,7 @@ app.add_middleware(
 )
 
 # ----------------------------------------------------
-# Conexão com SQL Server
+# Conexão com SQL Server (BLINDADA)
 # ----------------------------------------------------
 def conectar_bd():
     return pymssql.connect(
@@ -27,16 +27,19 @@ def conectar_bd():
         password=os.getenv("DB_PASS"),
         database=os.getenv("DB_NAME"),
         port=1433,
-        tds_version="7.4"
+        tds_version="7.4",
+        login_timeout=5,   # evita travar no connect
+        timeout=30         # evita query infinita
     )
 
 # ----------------------------------------------------
-# /visitas_periodo – incremental blindado (>= 2025)
+# /visitas_periodo – incremental PAGINADO (SEGURANÇA TOTAL)
 # ----------------------------------------------------
 @app.get("/visitas_periodo")
 def visitas_periodo(
     last_date: str = "2025-01-01T00:00:00",
-    last_id: int = 0
+    last_id: int = 0,
+    limit: int = 500
 ):
     try:
         DATA_INICIO_FIXA = datetime(2025, 1, 1)
@@ -45,7 +48,7 @@ def visitas_periodo(
             last_date.replace("Z", "")
         )
 
-        # Garante que nunca volte antes de 2025
+        # Nunca permite buscar antes de 2025
         if last_date_dt < DATA_INICIO_FIXA:
             last_date_dt = DATA_INICIO_FIXA
 
@@ -88,6 +91,8 @@ def visitas_periodo(
             ORDER BY
                 DATA_HORA_INICIO ASC,
                 ID_OS ASC
+            OFFSET 0 ROWS
+            FETCH NEXT %s ROWS ONLY
         """
 
         cursor.execute(
@@ -96,7 +101,8 @@ def visitas_periodo(
                 DATA_INICIO_FIXA,
                 last_date_dt,
                 last_date_dt,
-                last_id
+                last_id,
+                limit
             )
         )
 
@@ -107,7 +113,8 @@ def visitas_periodo(
 
         return {
             "status": "success",
-            "total": len(registros),
+            "returned": len(registros),
+            "limit": limit,
             "data": registros
         }
 
@@ -118,10 +125,15 @@ def visitas_periodo(
         }
 
 # ----------------------------------------------------
-# /visitas_por_id – backfill cirúrgico por faixa de ID
+# /visitas_por_id – backfill por faixa (CONTROLADO)
 # ----------------------------------------------------
 @app.get("/visitas_por_id")
-def visitas_por_id(id_inicio: int, id_fim: int):
+def visitas_por_id(
+    id_inicio: int,
+    id_fim: int,
+    limit: int = 500,
+    offset: int = 0
+):
     try:
         conn = conectar_bd()
         cursor = conn.cursor(as_dict=True)
@@ -152,9 +164,20 @@ def visitas_por_id(id_inicio: int, id_fim: int):
             FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
             WHERE ID_OS BETWEEN %s AND %s
             ORDER BY ID_OS ASC
+            OFFSET %s ROWS
+            FETCH NEXT %s ROWS ONLY
         """
 
-        cursor.execute(query, (id_inicio, id_fim))
+        cursor.execute(
+            query,
+            (
+                id_inicio,
+                id_fim,
+                offset,
+                limit
+            )
+        )
+
         registros = cursor.fetchall()
 
         cursor.close()
@@ -162,7 +185,9 @@ def visitas_por_id(id_inicio: int, id_fim: int):
 
         return {
             "status": "success",
-            "total": len(registros),
+            "returned": len(registros),
+            "limit": limit,
+            "offset": offset,
             "data": registros
         }
 
@@ -173,7 +198,7 @@ def visitas_por_id(id_inicio: int, id_fim: int):
         }
 
 # ----------------------------------------------------
-# /visitas_backfill_data – histórico paginado (< data)
+# /visitas_backfill_data – histórico PAGINADO
 # ----------------------------------------------------
 @app.get("/visitas_backfill_data")
 def visitas_backfill_data(
@@ -219,7 +244,15 @@ def visitas_backfill_data(
             FETCH NEXT %s ROWS ONLY
         """
 
-        cursor.execute(query, (data_fim_dt, offset, limit))
+        cursor.execute(
+            query,
+            (
+                data_fim_dt,
+                offset,
+                limit
+            )
+        )
+
         registros = cursor.fetchall()
 
         cursor.close()
@@ -227,7 +260,9 @@ def visitas_backfill_data(
 
         return {
             "status": "success",
-            "total": len(registros),
+            "returned": len(registros),
+            "limit": limit,
+            "offset": offset,
             "data": registros
         }
 
@@ -243,3 +278,18 @@ def visitas_backfill_data(
 @app.get("/")
 def home():
     return {"message": "API Prime – OK 🚀"}
+
+# ----------------------------------------------------
+# Startup Railway (PORT CORRETA)
+# ----------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 8080))
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        log_level="info"
+    )
