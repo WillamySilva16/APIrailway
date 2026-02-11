@@ -18,7 +18,7 @@ app.add_middleware(
 )
 
 # ----------------------------------------------------
-# Conexão com SQL Server (BLINDADA)
+# Conexão com SQL Server
 # ----------------------------------------------------
 def conectar_bd():
     return pymssql.connect(
@@ -33,13 +33,13 @@ def conectar_bd():
     )
 
 # ----------------------------------------------------
-# /visitas_periodo – incremental PAGINADO
+# /visitas_periodo – incremental paginado
 # ----------------------------------------------------
 @app.get("/visitas_periodo")
 def visitas_periodo(
     last_date: str = "2025-01-01T00:00:00",
     last_id: int = 0,
-    limit: int = 500
+    limit: int = Query(500, ge=1, le=5000)
 ):
     try:
         DATA_INICIO_FIXA = datetime(2025, 1, 1)
@@ -54,10 +54,11 @@ def visitas_periodo(
         conn = conectar_bd()
         cursor = conn.cursor(as_dict=True)
 
-        query = """
+        query = f"""
             SELECT
                 ID_OS,
                 CODIGO_OS,
+                CODIGO_CLIENTE,
                 SUPERVISOR,
                 CLIENTE,
                 DATA_HORA_FIM,
@@ -89,7 +90,7 @@ def visitas_periodo(
                 )
             ORDER BY DATA_HORA_INICIO ASC, ID_OS ASC
             OFFSET 0 ROWS
-            FETCH NEXT %s ROWS ONLY
+            FETCH NEXT {limit} ROWS ONLY
         """
 
         cursor.execute(
@@ -98,12 +99,12 @@ def visitas_periodo(
                 DATA_INICIO_FIXA,
                 last_date_dt,
                 last_date_dt,
-                last_id,
-                limit
+                last_id
             )
         )
 
         registros = cursor.fetchall()
+
         cursor.close()
         conn.close()
 
@@ -117,8 +118,9 @@ def visitas_periodo(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
 # ----------------------------------------------------
-# /visitas_full – FULL REFRESH (2025 → MAIS RECENTE)
+# /visitas_full – full refresh
 # ----------------------------------------------------
 @app.get("/visitas_full")
 def visitas_full(
@@ -138,10 +140,11 @@ def visitas_full(
         conn = conectar_bd()
         cursor = conn.cursor(as_dict=True)
 
-        query = """
+        query = f"""
             SELECT
                 ID_OS,
                 CODIGO_OS,
+                CODIGO_CLIENTE,
                 SUPERVISOR,
                 CLIENTE,
                 DATA_HORA_FIM,
@@ -165,11 +168,10 @@ def visitas_full(
             WHERE DATA_HORA_INICIO >= %s
             ORDER BY DATA_HORA_INICIO ASC, ID_OS ASC
             OFFSET 0 ROWS
-            FETCH NEXT %s ROWS ONLY
-
+            FETCH NEXT {limit} ROWS ONLY
         """
 
-        cursor.execute(query, (start_dt, limit))
+        cursor.execute(query, (start_dt,))
         registros = cursor.fetchall()
 
         cursor.close()
@@ -185,24 +187,26 @@ def visitas_full(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
 # ----------------------------------------------------
-# /visitas_por_id – backfill por faixa
+# /visitas_por_id – faixa por ID
 # ----------------------------------------------------
 @app.get("/visitas_por_id")
 def visitas_por_id(
     id_inicio: int,
     id_fim: int,
-    limit: int = 500,
-    offset: int = 0
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0)
 ):
     try:
         conn = conectar_bd()
         cursor = conn.cursor(as_dict=True)
 
-        query = """
+        query = f"""
             SELECT
                 ID_OS,
                 CODIGO_OS,
+                CODIGO_CLIENTE,
                 SUPERVISOR,
                 CLIENTE,
                 DATA_HORA_FIM,
@@ -225,16 +229,13 @@ def visitas_por_id(
             FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
             WHERE ID_OS BETWEEN %s AND %s
             ORDER BY ID_OS ASC
-            OFFSET %s ROWS
-            FETCH NEXT %s ROWS ONLY
+            OFFSET {offset} ROWS
+            FETCH NEXT {limit} ROWS ONLY
         """
 
-        cursor.execute(
-            query,
-            (id_inicio, id_fim, offset, limit)
-        )
-
+        cursor.execute(query, (id_inicio, id_fim))
         registros = cursor.fetchall()
+
         cursor.close()
         conn.close()
 
@@ -249,72 +250,6 @@ def visitas_por_id(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# ----------------------------------------------------
-# /visitas_backfill_data – histórico
-# ----------------------------------------------------
-@app.get("/visitas_backfill_data")
-def visitas_backfill_data(
-    data_fim: str,
-    limit: int = 500,
-    offset: int = 0
-):
-    try:
-        data_fim_dt = datetime.fromisoformat(
-            data_fim.replace("Z", "")
-        )
-
-        conn = conectar_bd()
-        cursor = conn.cursor(as_dict=True)
-
-        query = """
-            SELECT
-                ID_OS,
-                CODIGO_OS,
-                SUPERVISOR,
-                CLIENTE,
-                DATA_HORA_FIM,
-                DATA_HORA_INICIO,
-                STATUS_OS,
-                GRUPO_CLIENTE,
-                DATA_HORA_AGENDAMENTO,
-                STATUS_VISITA,
-                LOCALIZACAO_INICIO,
-                MOTIVO_NAO_VISITA,
-                OUTRO_MOTIVO_NAO_VISITA,
-                ENDERECO,
-                NUMERO_ENDERECO,
-                BAIRRO,
-                CIDADE,
-                UF,
-                COMPLEMENTO,
-                CEP,
-                TIPO_CHECKIN
-            FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
-            WHERE DATA_HORA_INICIO < %s
-            ORDER BY DATA_HORA_INICIO ASC, ID_OS ASC
-            OFFSET %s ROWS
-            FETCH NEXT %s ROWS ONLY
-        """
-
-        cursor.execute(
-            query,
-            (data_fim_dt, offset, limit)
-        )
-
-        registros = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        return {
-            "status": "success",
-            "returned": len(registros),
-            "limit": limit,
-            "offset": offset,
-            "data": registros
-        }
-
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
 # ----------------------------------------------------
 # Health check
@@ -322,6 +257,7 @@ def visitas_backfill_data(
 @app.get("/")
 def home():
     return {"message": "API Prime – OK 🚀"}
+
 
 # ----------------------------------------------------
 # Startup Railway
