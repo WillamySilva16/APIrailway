@@ -164,6 +164,61 @@ def visitas_supervisor_full(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+
+
+
+#-----------------------------------------------------
+# Endpoint de contratos (FULL)
+#-----------------------------------------------------
+
+@app.get("/contratos")
+def contratos(
+    start_date: str = "2025-01-01T00:00:00",
+    limit: int = Query(500000, ge=1, le=600000)
+):
+    try:
+        start_dt = datetime.fromisoformat(start_date.replace("Z", ""))
+
+        if start_dt < DATA_MINIMA:
+            start_dt = DATA_MINIMA
+
+        conn = conectar_bd()
+        cursor = conn.cursor(as_dict=True)
+
+        query = """
+            SELECT
+                ID_OS,
+                CODIGO_CLIENTE,
+                CLIENTE,
+                SUPERVISOR,
+                DATA_HORA_INICIO
+            FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
+            WHERE DATA_HORA_INICIO >= %s
+            ORDER BY DATA_HORA_INICIO ASC, ID_OS ASC
+            OFFSET 0 ROWS FETCH NEXT %s ROWS ONLY
+        """
+
+        cursor.execute(query, (start_dt, limit))
+        registros = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "status": "success",
+            "mode": "contratos_full",
+            "returned": len(registros),
+            "data": registros
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
 # ----------------------------------------------------
 # Health check
 # ----------------------------------------------------
