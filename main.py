@@ -1,10 +1,10 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
+from datetime import datetime, timedelta
 import pymssql
 import os
 
-app = FastAPI()
+app = FastAPI(title="API Supervisores")
 
 # ----------------------------------------------------
 # CORS
@@ -16,6 +16,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ----------------------------------------------------
+# Configuração base
+# ----------------------------------------------------
+DATA_MINIMA = datetime(2025, 1, 1)
 
 # ----------------------------------------------------
 # Conexão com SQL Server
@@ -32,29 +37,22 @@ def conectar_bd():
         timeout=30
     )
 
-# ----------------------------------------------------
-# /visitas_periodo – incremental paginado
-# ----------------------------------------------------
-@app.get("/visitas_periodo")
-def visitas_periodo(
-    last_date: str = "2025-01-01T00:00:00",
-    last_id: int = 0,
-    limit: int = Query(500, ge=1, le=5000)
-):
+# ====================================================
+# 🔁 INCREMENTAL – janela móvel (últimos 2 dias)
+# ====================================================
+@app.get("/visitas_supervisor_sync")
+def visitas_supervisor_sync():
     try:
-        DATA_INICIO_FIXA = datetime(2025, 1, 1)
+        agora = datetime.now()
+        inicio_janela = agora - timedelta(days=2)
 
-        last_date_dt = datetime.fromisoformat(
-            last_date.replace("Z", "")
-        )
-
-        if last_date_dt < DATA_INICIO_FIXA:
-            last_date_dt = DATA_INICIO_FIXA
+        if inicio_janela < DATA_MINIMA:
+            inicio_janela = DATA_MINIMA
 
         conn = conectar_bd()
         cursor = conn.cursor(as_dict=True)
 
-        query = f"""
+        query = """
             SELECT
                 ID_OS,
                 CODIGO_OS,
@@ -79,30 +77,11 @@ def visitas_periodo(
                 CEP,
                 TIPO_CHECKIN
             FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
-            WHERE
-                DATA_HORA_INICIO >= %s
-                AND (
-                    DATA_HORA_INICIO > %s
-                    OR (
-                        DATA_HORA_INICIO = %s
-                        AND ID_OS > %s
-                    )
-                )
+            WHERE DATA_HORA_INICIO BETWEEN %s AND %s
             ORDER BY DATA_HORA_INICIO ASC, ID_OS ASC
-            OFFSET 0 ROWS
-            FETCH NEXT {limit} ROWS ONLY
         """
 
-        cursor.execute(
-            query,
-            (
-                DATA_INICIO_FIXA,
-                last_date_dt,
-                last_date_dt,
-                last_id
-            )
-        )
-
+        cursor.execute(query, (inicio_janela, agora))
         registros = cursor.fetchall()
 
         cursor.close()
@@ -110,29 +89,26 @@ def visitas_periodo(
 
         return {
             "status": "success",
+            "mode": "incremental_sync",
+            "from": inicio_janela.isoformat(),
+            "to": agora.isoformat(),
             "returned": len(registros),
-            "limit": limit,
             "data": registros
         }
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-
-# ----------------------------------------------------
-# /visitas_full – full refresh
-# ----------------------------------------------------
-@app.get("/visitas_full")
-def visitas_full(
+# ====================================================
+# 🔥 FULL – correção de histórico
+# ====================================================
+@app.get("/visitas_supervisor_full")
+def visitas_supervisor_full(
     start_date: str = "2025-01-01T00:00:00",
-    limit: int = Query(200000, ge=1, le=500000)
+    limit: int = Query(300000, ge=1, le=600000)
 ):
     try:
-        DATA_MINIMA = datetime(2025, 1, 1)
-
-        start_dt = datetime.fromisoformat(
-            start_date.replace("Z", "")
-        )
+        start_dt = datetime.fromisoformat(start_date.replace("Z", ""))
 
         if start_dt < DATA_MINIMA:
             start_dt = DATA_MINIMA
@@ -179,6 +155,7 @@ def visitas_full(
 
         return {
             "status": "success",
+            "mode": "full_refresh",
             "from": start_dt.isoformat(),
             "returned": len(registros),
             "data": registros
@@ -187,77 +164,12 @@ def visitas_full(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-
-# ----------------------------------------------------
-# /visitas_por_id – faixa por ID
-# ----------------------------------------------------
-@app.get("/visitas_por_id")
-def visitas_por_id(
-    id_inicio: int,
-    id_fim: int,
-    limit: int = Query(500, ge=1, le=5000),
-    offset: int = Query(0, ge=0)
-):
-    try:
-        conn = conectar_bd()
-        cursor = conn.cursor(as_dict=True)
-
-        query = f"""
-            SELECT
-                ID_OS,
-                CODIGO_OS,
-                CODIGO_CLIENTE,
-                SUPERVISOR,
-                CLIENTE,
-                DATA_HORA_FIM,
-                DATA_HORA_INICIO,
-                STATUS_OS,
-                GRUPO_CLIENTE,
-                DATA_HORA_AGENDAMENTO,
-                STATUS_VISITA,
-                LOCALIZACAO_INICIO,
-                MOTIVO_NAO_VISITA,
-                OUTRO_MOTIVO_NAO_VISITA,
-                ENDERECO,
-                NUMERO_ENDERECO,
-                BAIRRO,
-                CIDADE,
-                UF,
-                COMPLEMENTO,
-                CEP,
-                TIPO_CHECKIN
-            FROM TAB_REGISTRO_VISITA_SUPERVISAO_CABECALHO
-            WHERE ID_OS BETWEEN %s AND %s
-            ORDER BY ID_OS ASC
-            OFFSET {offset} ROWS
-            FETCH NEXT {limit} ROWS ONLY
-        """
-
-        cursor.execute(query, (id_inicio, id_fim))
-        registros = cursor.fetchall()
-
-        cursor.close()
-        conn.close()
-
-        return {
-            "status": "success",
-            "returned": len(registros),
-            "limit": limit,
-            "offset": offset,
-            "data": registros
-        }
-
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
 # ----------------------------------------------------
 # Health check
 # ----------------------------------------------------
 @app.get("/")
 def home():
-    return {"message": "API Prime – OK 🚀"}
-
+    return {"message": "API Supervisores – OK 🚀"}
 
 # ----------------------------------------------------
 # Startup Railway
